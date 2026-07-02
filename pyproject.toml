@@ -1,0 +1,12 @@
+[project]
+name = "objects-iot-simulate"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "paho-mqtt>=2.1.0",
+]
+
+[project.scripts]
+objects-iot-simulate = "main:main"
