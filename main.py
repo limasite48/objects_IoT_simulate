@@ -128,9 +128,9 @@ def display_status():
     print(f"Thời tiết Hà Nội ngoài trời: {sim.outdoor_temp:.1f}°C | Độ ẩm: {sim.outdoor_humid:.1f}% | Cường độ sáng: {sim.outdoor_light:.0f} lux\n")
     
     # Header bảng Zone
-    print(f"+-----------------+---------+--------+-------------+-------+-------+-------------------------+")
-    print(f"|        Phân vùng| Nhiệt độ|   Độ ẩm|     Ánh sáng|   Khói|    Đèn|             Điều hòa AHU|")
-    print(f"+-----------------+---------+--------+-------------+-------+-------+-------------------------+")
+    print(f"+-----------------+----------+--------+-------------+-------+-------+-------------------------+")
+    print(f"|       Phân vùng | Nhiệt độ |  Độ ẩm |    Ánh sáng |  Khói |   Đèn |            Điều hòa AHU |")
+    print(f"+-----------------+----------+--------+-------------+-------+-------+-------------------------+")
     for zone in ZONES:
         state = sim.zone_states[zone]
         smoke_str = "CÓ KHÓI" if state["smoke"] else "Không"
@@ -141,8 +141,8 @@ def display_status():
         else:
             ahu_str = f"Tắt (Đặt:{state['ahu_temp_set']:.1f}°C)"
             
-        print(f"| {zone:<15} | {state['temp']:>5.1f}°C | {state['humid']:>5.1f}% | {state['light_intensity']:>7} lux | {smoke_str:<5} | {light_str:<5} | {ahu_str:<23} |")
-    print(f"+-----------------+---------+--------+-------------+-------+-------+-------------------------+")
+        print(f"| {zone:<15} |  {state['temp']:>5.1f}°C | {state['humid']:>5.1f}% | {state['light_intensity']:>7} lux | {smoke_str:<5} |  {light_str:<5}| {ahu_str:<23} |")
+    print(f"+-----------------+----------+--------+-------------+-------+-------+-------------------------+")
     
     # Bảng Cửa đi
     print("\n--- TRẠNG THÁI CỬA ĐI ---")

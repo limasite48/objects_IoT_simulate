@@ -1,5 +1,31 @@
 import struct
-from config import TYPE_CODES, CODE_TO_TYPE, ZONE_CODES, CODE_TO_ZONE
+from Crypto.Cipher import AES
+from config import TYPE_CODES, CODE_TO_TYPE, ZONE_CODES, CODE_TO_ZONE, AES_KEY
+
+tx_sequence_counter = 0
+
+def get_next_sequence_number() -> int:
+    """Tự động tăng và trả về Sequence Counter cho bản tin tiếp theo"""
+    global tx_sequence_counter
+    tx_sequence_counter += 1
+    return tx_sequence_counter
+
+def aes_ccm_encrypt(zone_id: int, type_code: int, seq_num: int, plaintext: bytes) -> tuple[bytes, bytes]:
+    """Mã hóa AES-CCM và trả về (ciphertext, tag)"""
+    # Tạo Nonce 13-Byte: [Zone ID (1B)][Type Code (1B)][Seq (4B)] + 7 Bytes 0x00
+    nonce = struct.pack(">BBI", zone_id, type_code, seq_num) + b"\x00" * 7
+    cipher = AES.new(AES_KEY, AES.MODE_CCM, nonce=nonce, mac_len=4)
+    ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+    return ciphertext, tag
+
+def aes_ccm_decrypt(zone_id: int, type_code: int, seq_num: int, ciphertext: bytes, tag: bytes) -> bytes:
+    """Giải mã AES-CCM và xác thực tính toàn vẹn (trả về plaintext hoặc None)"""
+    nonce = struct.pack(">BBI", zone_id, type_code, seq_num) + b"\x00" * 7
+    cipher = AES.new(AES_KEY, AES.MODE_CCM, nonce=nonce, mac_len=4)
+    try:
+        return cipher.decrypt_and_verify(ciphertext, tag)
+    except ValueError:
+        return None
 
 def calculate_checksum(zone_id: int, type_code: int, length: int, payload: bytes) -> int:
     """Tính toán XOR Checksum cho khung truyền tin"""
@@ -9,46 +35,68 @@ def calculate_checksum(zone_id: int, type_code: int, length: int, payload: bytes
     return chk
 
 def wrap_uplink_frame(zone_id: int, type_code: int, payload: bytes) -> str:
-    """Đóng gói dữ liệu uplink (Device -> Gateway) thành chuỗi Hex"""
-    length = len(payload)
-    checksum = calculate_checksum(zone_id, type_code, length, payload)
-    frame = bytearray([0xA5, zone_id, type_code, length]) + payload + bytearray([checksum, 0x5A])
+    """Đóng gói dữ liệu uplink (Device -> Gateway) thành chuỗi Hex có mã hóa bảo mật AES-CCM"""
+    seq_num = get_next_sequence_number()
+    ciphertext, tag = aes_ccm_encrypt(zone_id, type_code, seq_num, payload)
+    # Secure Payload: [Sequence Number (4B)] + [Ciphertext] + [Tag (4B)]
+    secure_payload = struct.pack(">I", seq_num) + ciphertext + tag
+    
+    length = len(secure_payload)
+    checksum = calculate_checksum(zone_id, type_code, length, secure_payload)
+    frame = bytearray([0xA5, zone_id, type_code, length]) + secure_payload + bytearray([checksum, 0x5A])
     return frame.hex().upper()
 
 def wrap_downlink_frame(zone_id: int, type_code: int, payload: bytes) -> str:
-    """Đóng gói dữ liệu downlink (Gateway -> Device) thành chuỗi Hex (tiện dùng kiểm thử)"""
-    length = len(payload)
-    checksum = calculate_checksum(zone_id, type_code, length, payload)
-    frame = bytearray([0x5A, zone_id, type_code, length]) + payload + bytearray([checksum, 0xA5])
+    """Đóng gói dữ liệu downlink (Gateway -> Device) thành chuỗi Hex có mã hóa AES-CCM (dùng cho test)"""
+    seq_num = get_next_sequence_number()
+    ciphertext, tag = aes_ccm_encrypt(zone_id, type_code, seq_num, payload)
+    secure_payload = struct.pack(">I", seq_num) + ciphertext + tag
+    
+    length = len(secure_payload)
+    checksum = calculate_checksum(zone_id, type_code, length, secure_payload)
+    frame = bytearray([0x5A, zone_id, type_code, length]) + secure_payload + bytearray([checksum, 0xA5])
     return frame.hex().upper()
 
 def parse_downlink_frame(hex_str: str):
-    """Giải mã khung truyền tin downlink (Gateway -> Device)"""
+    """Giải mã khung truyền tin downlink (Gateway -> Device) và giải mã AES-CCM"""
     try:
         hex_clean = hex_str.strip().replace(" ", "")
         data = bytes.fromhex(hex_clean)
-        if len(data) < 7:
-            return None # Khung quá ngắn
+        if len(data) < 15: # Ít nhất: 6 bytes overhead + 4B seq + 4B tag + 1B payload
+            return None 
         if data[0] != 0x5A or data[-1] != 0xA5:
-            return None # Sai Start/End byte
+            return None 
             
         zone_id = data[1]
         type_code = data[2]
         length = data[3]
         
         if len(data) != 6 + length:
-            return None # Độ dài không khớp thực tế
+            return None 
             
-        payload = data[4:4+length]
+        secure_payload = data[4:4+length]
         checksum = data[4+length]
         
-        if checksum != calculate_checksum(zone_id, type_code, length, payload):
-            return None # Sai Checksum
+        if checksum != calculate_checksum(zone_id, type_code, length, secure_payload):
+            return None 
+            
+        # Tách Secure Payload: [Seq (4B)] + [Ciphertext] + [Tag (4B)]
+        if len(secure_payload) < 8:
+            return None
+        seq_num = struct.unpack(">I", secure_payload[:4])[0]
+        ciphertext = secure_payload[4:-4]
+        tag = secure_payload[-4:]
+        
+        # Giải mã và kiểm tra tính hợp lệ bằng AES-CCM
+        plaintext = aes_ccm_decrypt(zone_id, type_code, seq_num, ciphertext, tag)
+        if plaintext is None:
+            print(f"[SECURITY ALERT] Nhận lệnh Downlink sai mã xác thực AES-CCM! Gói tin bị từ chối.", flush=True)
+            return None
             
         return {
             "zone_id": zone_id,
             "type_code": type_code,
-            "payload": payload
+            "payload": plaintext
         }
     except Exception:
         return None

@@ -48,8 +48,9 @@ class OfficeSimulation:
         # Hộp thư gửi tin nhắn Hex (chứa hàng đợi các gói tin hex sẵn sàng gửi lên)
         self.publish_queue = []
         
-        # Theo dõi lần gửi telemetry gần nhất (thực tế mỗi 10s)
+        # Theo dõi lần gửi telemetry và sync trạng thái gần nhất
         self.last_telemetry_real_time = 0.0
+        self.last_sync_real_time = 0.0
         
         # Tạo trạng thái ban đầu của toàn bộ thiết bị để đồng bộ Gateway ngay khi kết nối
         self.generate_initial_state()
@@ -194,44 +195,46 @@ class OfficeSimulation:
             target_light = base_light + outdoor_contribution + lamp_contribution
             state["light_intensity"] = max(0, int(target_light + random.randint(-2, 2)))
             
-        # 3. Gửi Telemetry định kỳ mỗi 10 giây (Thời gian thực)
-        if now_real - self.last_telemetry_real_time >= 10.0:
+        # 3. Gửi Telemetry định kỳ cảm biến mỗi 30 giây (Tránh quá tải Broker công cộng)
+        if now_real - self.last_telemetry_real_time >= 30.0:
             self.last_telemetry_real_time = now_real
-            self.generate_periodic_telemetry()
+            self.generate_sensor_telemetry()
             
-    def generate_periodic_telemetry(self):
-        """Tạo các gói tin telemetry định kỳ của cảm biến và đưa vào hàng đợi gửi"""
+        # 4. Gửi đồng bộ toàn bộ trạng thái thiết bị mỗi 60 giây (Shadow Sync)
+        if now_real - self.last_sync_real_time >= 60.0:
+            self.last_sync_real_time = now_real
+            self.generate_actuator_telemetry()
+            
+    def generate_sensor_telemetry(self):
+        """Tạo các gói tin telemetry định kỳ của cảm biến và đưa vào hàng đợi"""
         for zone in ZONES:
             state = self.zone_states[zone]
             zone_code = ZONE_CODES[zone]
             
-            # 1. DHT22
+            # DHT22
             self.publish_queue.append((
-                ZONE_CODES[zone], 
+                zone_code, 
                 TYPE_CODES["dht22"], 
                 encode_dht22(zone_code, state["temp"], state["humid"])
             ))
             
-            # 2. MQ2 (chỉ gửi khi có sự thay đổi hoặc ngẫu nhiên cập nhật, ở đây gửi định kỳ luôn để khớp v1)
+            # MQ2
             self.publish_queue.append((
-                ZONE_CODES[zone], 
+                zone_code, 
                 TYPE_CODES["mq2"], 
                 encode_mq2(zone_code, state["smoke"])
             ))
             
-            # 3. LM393
+            # LM393
             self.publish_queue.append((
-                ZONE_CODES[zone], 
+                zone_code, 
                 TYPE_CODES["lm393"], 
                 encode_lm393(zone_code, state["light_intensity"])
             ))
 
-    def generate_initial_state(self):
-        """Tạo dữ liệu trạng thái ban đầu của toàn bộ cảm biến, thiết bị, cửa để đồng bộ Gateway"""
-        # 1. Toàn bộ cảm biến DHT22, MQ2, LM393 của 12 Zones
-        self.generate_periodic_telemetry()
-        
-        # 2. Toàn bộ Đèn và AHU của 12 Zones
+    def generate_actuator_telemetry(self):
+        """Tạo các gói tin trạng thái của thiết bị chấp hành, cửa để đồng bộ Gateway"""
+        # 1. Toàn bộ Đèn và AHU của 12 Zones
         for zone in ZONES:
             state = self.zone_states[zone]
             zone_code = ZONE_CODES[zone]
@@ -250,7 +253,7 @@ class OfficeSimulation:
                 encode_ahu(zone_code, state["ahu_active"], state["ahu_fan_speed"], state["ahu_temp_set"])
             ))
             
-        # 3. Toàn bộ Cửa đi (MC38)
+        # 2. Toàn bộ Cửa đi (MC38)
         for door_id in self.doors:
             door_code = ZONE_CODES[door_id]
             is_open = self.doors[door_id]["is_open"]
@@ -260,7 +263,7 @@ class OfficeSimulation:
                 encode_mc38(door_code, is_open)
             ))
             
-        # 4. Toàn bộ Cửa sổ & Rèm (MC38, Curtain)
+        # 3. Toàn bộ Cửa sổ & Rèm (MC38, Curtain)
         for wd_id in self.windows:
             wd_code = ZONE_CODES[wd_id]
             is_open = self.windows[wd_id]["is_open"]
@@ -279,6 +282,11 @@ class OfficeSimulation:
                 TYPE_CODES["curtain"],
                 encode_curtain(wd_code, curtain_pct)
             ))
+
+    def generate_initial_state(self):
+        """Tạo dữ liệu trạng thái ban đầu của toàn bộ thiết bị"""
+        self.generate_sensor_telemetry()
+        self.generate_actuator_telemetry()
 
     # --- CÁC HÀM THAY ĐỔI TRẠNG THÁI (console hoặc MQTT ghi đè) ---
 
