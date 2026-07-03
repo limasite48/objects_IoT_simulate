@@ -134,25 +134,25 @@ def display_status():
     for zone in ZONES:
         state = sim.zone_states[zone]
         smoke_str = "CÓ KHÓI" if state["smoke"] else "Không"
-        light_str = "Bật" if state["light_active"] else "Tắt"
+        light_str = "BẬT" if state["light_active"] else "TẮT"
         
         if state["ahu_active"]:
-            ahu_str = f"Bật (TĐ:{state['ahu_fan_speed']}, Đặt:{state['ahu_temp_set']:.1f}°C)"
+            ahu_str = f"BẬT (TĐ:{state['ahu_fan_speed']}, Đặt:{state['ahu_temp_set']:.1f}°C)"
         else:
-            ahu_str = f"Tắt (Đặt:{state['ahu_temp_set']:.1f}°C)"
+            ahu_str = f"TẮT (Đặt:{state['ahu_temp_set']:.1f}°C)"
             
         print(f"| {zone:<15} |  {state['temp']:>5.1f}°C | {state['humid']:>5.1f}% | {state['light_intensity']:>7} lux | {smoke_str:<5} |  {light_str:<5}| {ahu_str:<23} |")
     print(f"+-----------------+----------+--------+-------------+-------+-------+-------------------------+")
     
     # Bảng Cửa đi
     print("\n--- TRẠNG THÁI CỬA ĐI ---")
-    door_line = " | ".join([f"{d}: {'MỞ' if info['is_open'] else 'Đóng'}" for d, info in sim.doors.items()])
+    door_line = " | ".join([f"{d}: {'MỞ' if info['is_open'] else 'ĐÓNG'}" for d, info in sim.doors.items()])
     print(door_line)
     
     # Bảng Cửa sổ & Rèm
     print("\n--- TRẠNG THÁI CỬA SỔ & RÈM ---")
     for wd, info in sim.windows.items():
-        print(f"- {wd}: {'MỞ' if info['is_open'] else 'Đóng'} | Rèm che phủ: {info['curtain_pct']}%")
+        print(f"- {wd}: {'MỞ' if info['is_open'] else 'ĐÓNG'} | Rèm che phủ: {info['curtain_pct']}%")
     print("")
 
 def console_loop():
@@ -196,7 +196,7 @@ def console_loop():
                 if zone in ZONES and state_str in ["on", "off"]:
                     active = (state_str == "on")
                     sim.set_light_state(zone, active)
-                    print(f"Đã điều khiển thủ công: Đèn {zone} -> {state_str.upper()}")
+                    print(f"Đã điều khiển thủ công: Đèn {zone} -> {'BẬT' if active else 'TẮT'}")
                 else:
                     print("Tên zone hoặc trạng thái không hợp lệ.")
             else:
@@ -211,7 +211,7 @@ def console_loop():
                     fan_speed = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
                     temp_set = float(parts[4]) if len(parts) > 4 else None
                     sim.set_ahu_state(zone, active, fan_speed, temp_set)
-                    print(f"Đã điều khiển thủ công: AHU {zone} -> {state_str.upper()} (Tốc độ: {fan_speed}, Đặt: {temp_set})")
+                    print(f"Đã điều khiển thủ công: AHU {zone} -> {'BẬT' if active else 'TẮT'} (Tốc độ: {fan_speed}, Đặt: {temp_set})")
                 else:
                     print("Tên zone hoặc trạng thái không hợp lệ.")
             else:
