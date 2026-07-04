@@ -47,6 +47,7 @@ class OfficeSimulation:
         
         # Hộp thư gửi tin nhắn Hex (chứa hàng đợi các gói tin hex sẵn sàng gửi lên)
         self.publish_queue = []
+        self.priority_publish_queue = []
         
         # Theo dõi lần gửi telemetry và sync trạng thái gần nhất
         self.last_telemetry_real_time = 0.0
@@ -195,15 +196,30 @@ class OfficeSimulation:
             target_light = base_light + outdoor_contribution + lamp_contribution
             state["light_intensity"] = max(0, int(target_light + random.randint(-2, 2)))
             
-        # 3. Gửi Telemetry định kỳ cảm biến mỗi 30 giây (Tránh quá tải Broker công cộng)
-        if now_real - self.last_telemetry_real_time >= 30.0:
-            self.last_telemetry_real_time = now_real
-            self.generate_sensor_telemetry()
+        # 3. Gửi Telemetry định kỳ cảm biến (Đã chuyển sang cơ chế Polling)
+        # if now_real - self.last_telemetry_real_time >= 30.0:
+        #     self.last_telemetry_real_time = now_real
+        #     self.generate_sensor_telemetry()
             
         # 4. Gửi đồng bộ toàn bộ trạng thái thiết bị mỗi 60 giây (Shadow Sync)
         if now_real - self.last_sync_real_time >= 60.0:
             self.last_sync_real_time = now_real
             self.generate_actuator_telemetry()
+            
+    def get_sensor_reading(self, zone: str, type_name: str) -> str:
+        """Lấy dữ liệu cảm biến hiện tại và trả về gói tin Hex đã đóng gói"""
+        if zone not in self.zone_states:
+            return None
+        state = self.zone_states[zone]
+        zone_code = ZONE_CODES[zone]
+        
+        if type_name == "dht22":
+            return encode_dht22(zone_code, state["temp"], state["humid"])
+        elif type_name == "mq2":
+            return encode_mq2(zone_code, state["smoke"])
+        elif type_name == "lm393":
+            return encode_lm393(zone_code, state["light_intensity"])
+        return None
             
     def generate_sensor_telemetry(self):
         """Tạo các gói tin telemetry định kỳ của cảm biến và đưa vào hàng đợi"""
@@ -291,40 +307,40 @@ class OfficeSimulation:
     # --- CÁC HÀM THAY ĐỔI TRẠNG THÁI (console hoặc MQTT ghi đè) ---
 
     def set_door_state(self, door_id: str, is_open: bool):
-        """Thay đổi trạng thái cửa đi và gửi ngay mã MC38 Hex tương ứng"""
+        """Thay đổi trạng thái cửa đi và gửi ngay mã MC38 Hex tương ứng (Ưu tiên cao)"""
         if door_id in self.doors:
             old_state = self.doors[door_id]["is_open"]
             self.doors[door_id]["is_open"] = is_open
             
             if old_state != is_open:
-                # Gửi gói tin MC38 ngay lập tức
+                # Gửi gói tin MC38 ngay lập tức vào hàng đợi ưu tiên
                 code = ZONE_CODES[door_id]
                 hex_msg = encode_mc38(code, is_open)
-                self.publish_queue.append((code, TYPE_CODES["mc38"], hex_msg))
+                self.priority_publish_queue.append((code, TYPE_CODES["mc38"], hex_msg))
                 return True
         return False
 
     def set_window_state(self, wd_id: str, is_open: bool):
-        """Thay đổi trạng thái cửa sổ và gửi ngay mã MC38 Hex tương ứng"""
+        """Thay đổi trạng thái cửa sổ và gửi ngay mã MC38 Hex tương ứng (Ưu tiên cao)"""
         if wd_id in self.windows:
             old_state = self.windows[wd_id]["is_open"]
             self.windows[wd_id]["is_open"] = is_open
             
             if old_state != is_open:
-                # Gửi gói tin MC38 ngay lập tức
+                # Gửi gói tin MC38 ngay lập tức vào hàng đợi ưu tiên
                 code = ZONE_CODES[wd_id]
                 hex_msg = encode_mc38(code, is_open)
-                self.publish_queue.append((code, TYPE_CODES["mc38"], hex_msg))
+                self.priority_publish_queue.append((code, TYPE_CODES["mc38"], hex_msg))
                 return True
         return False
 
     def set_light_state(self, zone: str, active: bool):
-        """Thay đổi trạng thái Đèn và gửi phản hồi Hex ngay lập tức"""
+        """Thay đổi trạng thái Đèn và gửi phản hồi Hex ngay lập tức (Ưu tiên cao)"""
         if zone in self.zone_states:
             self.zone_states[zone]["light_active"] = active
             code = ZONE_CODES[zone]
             hex_msg = encode_light(code, active)
-            self.publish_queue.append((code, TYPE_CODES["light"], hex_msg))
+            self.priority_publish_queue.append((code, TYPE_CODES["light"], hex_msg))
             
             # Thay đổi ánh sáng ngay lập tức trong mô phỏng
             lamp_contrib = 350.0 if active else 0.0
@@ -334,7 +350,7 @@ class OfficeSimulation:
         return False
 
     def set_ahu_state(self, zone: str, active: bool, fan_speed: int = None, temp_set: float = None):
-        """Thay đổi cấu hình AHU và gửi phản hồi Hex ngay lập tức"""
+        """Thay đổi cấu hình AHU và gửi phản hồi Hex ngay lập tức (Ưu tiên cao)"""
         if zone in self.zone_states:
             state = self.zone_states[zone]
             state["ahu_active"] = active
@@ -345,28 +361,28 @@ class OfficeSimulation:
                 
             code = ZONE_CODES[zone]
             hex_msg = encode_ahu(code, state["ahu_active"], state["ahu_fan_speed"], state["ahu_temp_set"])
-            self.publish_queue.append((code, TYPE_CODES["ahu"], hex_msg))
+            self.priority_publish_queue.append((code, TYPE_CODES["ahu"], hex_msg))
             return True
         return False
 
     def set_curtain_state(self, wd_id: str, percentage_cover: int):
-        """Thay đổi trạng thái rèm cửa sổ và gửi phản hồi Hex ngay lập tức"""
+        """Thay đổi trạng thái rèm cửa sổ và gửi phản hồi Hex ngay lập tức (Ưu tiên cao)"""
         if wd_id in self.windows:
             percentage_cover = max(0, min(100, int(percentage_cover)))
             self.windows[wd_id]["curtain_pct"] = percentage_cover
             
             code = ZONE_CODES[wd_id]
             hex_msg = encode_curtain(code, percentage_cover)
-            self.publish_queue.append((code, TYPE_CODES["curtain"], hex_msg))
+            self.priority_publish_queue.append((code, TYPE_CODES["curtain"], hex_msg))
             return True
         return False
 
     def set_smoke_alarm(self, zone: str, has_smoke: bool):
-        """Kích hoạt/tắt cảnh báo khói MQ2 trong Zone và gửi gói tin Hex ngay lập tức"""
+        """Kích hoạt/tắt cảnh báo khói MQ2 trong Zone và gửi gói tin Hex ngay lập tức (Ưu tiên cao)"""
         if zone in self.zone_states:
             self.zone_states[zone]["smoke"] = has_smoke
             code = ZONE_CODES[zone]
             hex_msg = encode_mq2(code, has_smoke)
-            self.publish_queue.append((code, TYPE_CODES["mq2"], hex_msg))
+            self.priority_publish_queue.append((code, TYPE_CODES["mq2"], hex_msg))
             return True
         return False

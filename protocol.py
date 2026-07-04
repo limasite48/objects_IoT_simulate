@@ -175,6 +175,11 @@ def decode_command_payload(type_code: int, payload: bytes):
             percentage_cover = struct.unpack(">B", payload)[0]
             return {"percentage_cover": percentage_cover}
             
+        elif type_code in [TYPE_CODES["dht22"], TYPE_CODES["mq2"], TYPE_CODES["lm393"]]:
+            # Lệnh Poll: 1 Byte (0x01)
+            is_poll = struct.unpack(">B", payload)[0] == 0x01
+            return {"poll": is_poll}
+            
     except Exception:
         pass
     return None

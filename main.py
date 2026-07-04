@@ -72,13 +72,18 @@ def on_message(client, userdata, msg):
         print(f"\n[ZIGBEE RX] Nhận lệnh Hex: {payload_str}")
         print(f"            Thiết bị: {zone_name} / {type_name} | Lệnh: {cmd_data}")
         
-    # Áp dụng lệnh vào hệ thống giả lập
+    # Áp dụng lệnh vào hệ thống giả lập hoặc phản hồi poll
     if type_name == "light":
         sim.set_light_state(zone_name, cmd_data["active"])
     elif type_name == "ahu":
         sim.set_ahu_state(zone_name, cmd_data["active"], cmd_data.get("fan_speed"), cmd_data.get("temp_set"))
     elif type_name == "curtain":
         sim.set_curtain_state(zone_name, cmd_data["percentage_cover"])
+    elif type_name in ["dht22", "mq2", "lm393"]:
+        if cmd_data.get("poll"):
+            hex_msg = sim.get_sensor_reading(zone_name, type_name)
+            if hex_msg:
+                sim.publish_queue.append((zone_code, type_code, hex_msg))
 
 # Khởi tạo MQTT Client sử dụng callback API version 2
 mqtt_client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
@@ -91,9 +96,14 @@ def simulation_loop():
     while True:
         sim.update()
         
-        # Đẩy tất cả các gói tin trong hàng đợi gửi (Zigbee uplink) lên Broker với độ trễ ngắn tránh rớt gói
-        while sim.publish_queue:
-            code, type_code, hex_msg = sim.publish_queue.pop(0)
+        # Đẩy tất cả các gói tin trong hàng đợi gửi (Zigbee uplink) lên Broker
+        while sim.priority_publish_queue or sim.publish_queue:
+            # Ưu tiên hàng đợi High Priority trước
+            if sim.priority_publish_queue:
+                code, type_code, hex_msg = sim.priority_publish_queue.pop(0)
+            else:
+                code, type_code, hex_msg = sim.publish_queue.pop(0)
+                
             res = mqtt_client.publish(TOPIC_TELEMETRY, hex_msg)
             
             if log_hex:
