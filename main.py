@@ -327,9 +327,16 @@ def main():
     t = threading.Thread(target=simulation_loop, daemon=True)
     t.start()
     
-    # Khởi chạy giao diện console dòng lệnh chính
+    # Khởi chạy giao diện console dòng lệnh chính.
+    # Nếu chạy nền (không có console tương tác), bỏ qua console và giữ tiến trình sống
+    # để mô phỏng + MQTT vẫn chạy liên tục.
     try:
-        console_loop()
+        if sys.stdin is not None and sys.stdin.isatty():
+            console_loop()
+        else:
+            print("[HEADLESS] Không có console tương tác — chạy nền, mô phỏng vẫn tiếp tục.", flush=True)
+            while True:
+                time.sleep(1)
     except Exception as e:
         print(f"Lỗi vòng lặp console: {e}")
     finally:

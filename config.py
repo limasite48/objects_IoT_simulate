@@ -1,6 +1,8 @@
 # Cấu hình cho hệ thống giả lập thiết bị & cảm biến IoT
 
-MQTT_BROKER = "broker.emqx.io"
+# Broker cục bộ dùng chung với gateway & backend (đổi từ broker.emqx.io sang localhost
+# để chạy pipeline thật: sensor -> gateway -> server qua một Mosquitto ở localhost:1883)
+MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 TOPIC_TELEMETRY = "duk1chvietcong/hcmc_office/telemetry"
 TOPIC_COMMAND = "duk1chvietcong/hcmc_office/command"
